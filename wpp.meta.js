@@ -2,7 +2,7 @@
 // @name         INU WebPort-Plus
 // @namespace    http://tampermonkey.net/
 // @author       Andreas Engstrand
-// @version      7.7.20261113.1114
+// @version      7.7.20261113.1125
 // @description  Enhanced UI for Kiona WebPort
 // @match        *://*/*
 // @grant        GM_setValue

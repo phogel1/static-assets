@@ -2,7 +2,7 @@
 // @name         INU WebPort-Plus
 // @namespace    http://tampermonkey.net/
 // @author       Andreas Engstrand
-// @version      7.7.20261113.1114
+// @version      7.7.20261113.1125
 // @description  Enhanced UI for Kiona WebPort
 // @match        *://*/*
 // @grant        GM_setValue
@@ -2410,6 +2410,7 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
                 }
                 bfValWrap.appendChild(sel2);
             } else {
+                bfValWrap.style.display='';
                 const inp=document.createElement('input');inp.id='bf-val';
                 inp.style.cssText='width:80px;padding:2px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px;';
                 inp.placeholder='Värde';
