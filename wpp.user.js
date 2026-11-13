@@ -1,7 +1,8 @@
 // ==UserScript==
 // @name         INU WebPort-Plus
 // @namespace    http://tampermonkey.net/
-// @version      7.6.20260519.1349
+// @author       Andreas Engstrand
+// @version      7.7.20261113.1114
 // @description  Enhanced UI for Kiona WebPort
 // @match        *://*/*
 // @grant        GM_setValue
@@ -3229,11 +3230,20 @@ ${delSection}
             const fieldOpts = opts[cellDef.field] || [];
             el = document.createElement('select');
             el.style.cssText = 'width:100%;font-size:11px;padding:1px 3px;border:1px solid #5b6abf;border-radius:2px;';
+            let matched = false;
             for (const o of fieldOpts) {
                 const opt = document.createElement('option');
                 opt.value = o.value; opt.textContent = o.text;
-                if (o.text === cur) opt.selected = true;
+                if (!matched && o.text === cur) { opt.selected = true; matched = true; }
                 el.appendChild(opt);
+            }
+            // If the current value isn't among the options, the browser would
+            // silently select the first option and a plain blur would save it.
+            // Keep the current value as a selected placeholder instead.
+            if (!matched) {
+                const opt = document.createElement('option');
+                opt.value = ''; opt.textContent = cur; opt.selected = true;
+                el.insertBefore(opt, el.firstChild);
             }
         } else {
             el = document.createElement('input');
@@ -5169,7 +5179,8 @@ ${this.buildTimelineHtml(group.key)}`;
                     await saveDeviceField(guid, (fd, doc) => {
                         if (fieldName === '_slave') {
                             const el = doc.querySelector('[name="Slave Address"],[name="Station"],[name="Unit ID"],[name="Node ID"],[name="Device Address"]');
-                            if (el) fd.set(el.name, nv);
+                            if (!el) throw new Error('Hittade inget slavadressfält i enhetsformuläret');
+                            fd.set(el.name, nv);
                         } else {
                             fd.set(fieldName, nv);
                         }
@@ -5592,7 +5603,8 @@ ${this.buildTimelineHtml(group.key)}`;
             const poid = el.id;
             if (!pageId || !poid) return;
             // Fetch current component form (contains all settings with current values)
-            const getResp = await fetch(`/Page/PageObjectProperties?pageid=${pageId}&id=${poid}`);
+            const getResp = await fetch(`/Page/PageObjectProperties?pageid=${encodeURIComponent(pageId)}&id=${encodeURIComponent(poid)}`);
+            if (!getResp.ok) throw new Error('HTTP ' + getResp.status);
             const html    = await getResp.text();
             const doc     = new DOMParser().parseFromString(html, 'text/html');
             const form    = doc.getElementById('poproperties');
@@ -5622,7 +5634,8 @@ ${this.buildTimelineHtml(group.key)}`;
                 if (!poid) return;
                 const x = parseFloat(el.style.left) || 0;
                 const y = parseFloat(el.style.top)  || 0;
-                const getResp = await fetch(`/Page/PageObjectProperties?pageid=${pageId}&id=${poid}`);
+                const getResp = await fetch(`/Page/PageObjectProperties?pageid=${encodeURIComponent(pageId)}&id=${encodeURIComponent(poid)}`);
+                if (!getResp.ok) throw new Error('HTTP ' + getResp.status);
                 const html    = await getResp.text();
                 const doc     = new DOMParser().parseFromString(html, 'text/html');
                 const form    = doc.getElementById('poproperties');
@@ -5674,7 +5687,7 @@ ${this.buildTimelineHtml(group.key)}`;
         const sel = editorGetSelected();
         if (sel.length !== 1) return;
         _editorPosClipboard = { x: parseFloat(sel[0].style.left) || 0, y: parseFloat(sel[0].style.top) || 0 };
-        toastr.info('Position kopierad (Ctrl+Shift+V för att klistra in)');
+        toast('Position kopierad (Ctrl+Shift+V för att klistra in)');
         editorUpdateStatusBar();
     }
 
@@ -6485,12 +6498,17 @@ ${this.buildTimelineHtml(group.key)}`;
                 const form = tmp.querySelector('#frmpage');
                 if (!form) throw new Error('Inget formulär i svar');
 
+                // append (not set) + skip unchecked boxes: with set(), the
+                // hidden "0" of each checkbox+hidden pair overwrote the "1".
                 const fd = new FormData();
                 for (const f of form.elements) {
-                    if (f.name) fd.set(f.name, f.value);
+                    if (!f.name) continue;
+                    if ((f.type === 'checkbox' || f.type === 'radio') && !f.checked) continue;
+                    fd.append(f.name, f.value);
                 }
                 fd.set('name', name);
-                await fetch('/page/actionadd', { method: 'POST', body: fd });
+                const addRes = await fetch('/page/actionadd', { method: 'POST', body: fd });
+                if (!addRes.ok) throw new Error('HTTP ' + addRes.status);
 
                 // Fix prefix: ActionAdd sets prefix=_name which causes WebPort to prepend
                 // the page station prefix. We must update properties immediately after
@@ -6514,7 +6532,8 @@ ${this.buildTimelineHtml(group.key)}`;
                     fd2.set('prefix', name);
                     // Set display text if a text pattern was provided
                     if (textPattern) fd2.set('name', _expandPattern(textPattern, start + i));
-                    await fetch('/page/UpdatePageObjectProperties', { method: 'POST', body: fd2 });
+                    const updRes = await fetch('/page/UpdatePageObjectProperties', { method: 'POST', body: fd2 });
+                    if (!updRes.ok) throw new Error('Egenskaper: HTTP ' + updRes.status);
                 }
 
                 created++;
