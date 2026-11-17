@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261117.1453
-// @description  TEST build from claude/zealous-hypatia-662ehu @ fb247bb — not for production
+// @version      7.8.20261117.1458
+// @description  TEST build from claude/zealous-hypatia-662ehu @ b870e05 — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -6152,6 +6152,9 @@ ${this.buildTimelineHtml(group.key)}`;
 
         const s = iDoc.createElement('style');
         s.textContent = `
+            /* WebPort 2.23 (no iframe): webport.css hides "#content > div" with
+               opacity:0 and fades its own blocks in via JS — our bar is such a div. */
+            #content > #inu-editor-toolbar { opacity: 1 !important; }
             #inu-editor-toolbar {
                 display: flex; align-items: center; gap: 0; flex-wrap: wrap;
                 padding: 4px 10px; background: #f5f5f8; border-bottom: 1px solid #ddd;

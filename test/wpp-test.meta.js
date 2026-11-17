@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261117.1453
-// @description  TEST build from claude/zealous-hypatia-662ehu @ fb247bb — not for production
+// @version      7.8.20261117.1458
+// @description  TEST build from claude/zealous-hypatia-662ehu @ b870e05 — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
