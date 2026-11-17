@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261117.1424
-// @description  TEST build from claude/zealous-hypatia-662ehu @ 3415f3a — not for production
+// @version      7.8.20261117.1453
+// @description  TEST build from claude/zealous-hypatia-662ehu @ fb247bb — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -5258,7 +5258,9 @@ ${this.buildTimelineHtml(group.key)}`;
     // ============================================================
     function isPageEditorPage() {
         const url = new URL(window.location.href);
-        return url.pathname.startsWith('/page') && url.searchParams.get('route') === 'edit';
+        // 2.25+: /page?route=edit&pageid=…   ≤2.23: /page/edit?pageid=…
+        return (url.pathname.startsWith('/page') && url.searchParams.get('route') === 'edit')
+            || /^\/page\/edit\/?$/i.test(url.pathname);
     }
 
     const EDITOR_GRID_SIZES = [4, 8, 16, 24, 32];
@@ -5284,7 +5286,28 @@ ${this.buildTimelineHtml(group.key)}`;
     let _editorPosClipboard = null; // {x, y} for copy/paste position
     let _editorLocked = {};         // {elementId: true} persisted via GM_setValue
 
-    function editorGetIframe() { return document.querySelector('#content iframe'); }
+    // WebPort ≤2.23 renders the editor straight into the top document (no
+    // iframe). The editor code only touches contentDocument / contentWindow /
+    // load listeners, so a small stand-in object lets all of it run unchanged.
+    // contentWindow must be the PAGE window (jQuery, renderComponentV2 …).
+    let _legacyEditorFrame = null;
+    function editorIsLegacy() { return !!(_editorIframe && _editorIframe.__inuLegacy); }
+    function editorGetIframe() {
+        const f = document.querySelector('#content iframe');
+        if (f) return f;
+        if (!document.getElementById('wp_editpanel')) return null;
+        if (!_legacyEditorFrame) {
+            const pageWin = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || window;
+            _legacyEditorFrame = {
+                __inuLegacy: true,
+                contentDocument: document,
+                contentWindow: pageWin,
+                parentElement: document.getElementById('content') || document.body,
+                addEventListener() {}, removeEventListener() {},
+            };
+        }
+        return _legacyEditorFrame;
+    }
 
     function editorGetSelected() {
         if (!_editorIframe) return [];
@@ -6339,6 +6362,23 @@ ${this.buildTimelineHtml(group.key)}`;
     // props: { prefix, name (display text), textposition, rotation (0..3) }.
     // Defaults prefix to the full name (no leading underscore) like before.
     const _encodeWPId = s => String(s).replace(/\./g, '-2E-').replace(/_/g, '-5F-');
+    // WebPort ≤2.23 element ids: "<pageid>-23<name>" ('#' = -23), "_" kept,
+    // Å/Ä/Ö → -07/-08/-09, other non-alphanumerics → -<hex> (verified on 2.23.3).
+    const _WP223_CHARS = { 'Å': '-07', 'Ä': '-08', 'Ö': '-09' };
+    const _encodeWPId223 = s => String(s).replace(/[^A-Za-z0-9_]/g,
+        c => _WP223_CHARS[c] || ('-' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')));
+    const _decodeWPId223 = s => String(s).replace(/-(0[789]|[0-9A-F]{2})/g, (m, h) =>
+        ({ '07': 'Å', '08': 'Ä', '09': 'Ö' })[h] || String.fromCharCode(parseInt(h, 16)));
+    // Element-id prefix for objects on this page, per WebPort version.
+    function _wpElementIdPrefix(pageid) {
+        return editorIsLegacy() ? _encodeWPId223(pageid) + '-23' : _encodeWPId(pageid) + '-2E-';
+    }
+    function _wpElementId(pageid, name) {
+        return _wpElementIdPrefix(pageid) + (editorIsLegacy() ? _encodeWPId223(name) : _encodeWPId(name));
+    }
+    function _wpDecodeName(encName) {
+        return editorIsLegacy() ? _decodeWPId223(encName) : encName.replace(/-5F-/g, '_').replace(/-2E-/g, '.');
+    }
     function _serializeWPForm(form) {
         // append (not set) + skip unchecked boxes: with set(), the hidden "0"
         // of each checkbox+hidden pair overwrote the "1".
@@ -6385,7 +6425,7 @@ ${this.buildTimelineHtml(group.key)}`;
 
         // Fix prefix: ActionAdd sets prefix=_name which causes WebPort to prepend
         // the page station prefix. Update properties right after creation.
-        const elementId = _encodeWPId(pageid) + '-2E-' + _encodeWPId(name);
+        const elementId = _wpElementId(pageid, name);
         const propsRes = await fetch(
             `/Page/PageObjectProperties?pageid=${encodeURIComponent(pageid)}&id=${encodeURIComponent(elementId)}`
         );
@@ -6398,6 +6438,8 @@ ${this.buildTimelineHtml(group.key)}`;
         fd2.set('prefix', props.prefix ?? name);
         if (props.name != null && props.name !== '') fd2.set('name', props.name);
         if (props.textposition != null) fd2.set('textposition', String(props.textposition));
+        if (props.textdx) fd2.set('textpositionoffsetx', String(props.textdx));
+        if (props.textdy) fd2.set('textpositionoffsety', String(props.textdy));
         if (wantRot && _setRotationField(fd2, propsForm, props.rotation)) rotationApplied = true;
         if (wantRot && !rotationApplied && !_rotationFieldWarned) {
             _rotationFieldWarned = true;
@@ -6560,6 +6602,21 @@ ${this.buildTimelineHtml(group.key)}`;
         return { x: Math.round(x), y: Math.round(y), w, h };
     }
 
+    // WebPort places the label against the UNROTATED element box, so for a symbol
+    // turned 90/270° the text lands inside the drawn symbol. Shift it out by half
+    // the width/height difference (textpositionoffsetx/y, canvas px; −x = left,
+    // verified on WebPort 2.23).
+    function svgiTextOffset(textpos, rot, size) {
+        if (!(rot % 2) || !size) return { dx: 0, dy: 0 };
+        const extra = Math.round((size[1] - size[0]) / 2);   // (h − w) / 2
+        if (!extra) return { dx: 0, dy: 0 };                 // square: nothing to fix (and no −0)
+        const T = SVGI_TEXTPOS;
+        if (textpos === T.LEFT)  return { dx: -extra, dy: 0 };
+        if (textpos === T.RIGHT) return { dx: extra, dy: 0 };
+        if (textpos === T.TOPCENTER || textpos === 1 || textpos === 7) return { dx: 0, dy: extra };
+        return { dx: 0, dy: -extra };                        // bottom variants
+    }
+
     // Build the editable plan.
     //   extracted: { objects, texts }
     //   opts: { rules, pagePrefix, symbolSize(lib) → [w,h]|null, existingNames:Set }
@@ -6602,6 +6659,8 @@ ${this.buildTimelineHtml(group.key)}`;
             const prefix = o.pagePrefix ? o.pagePrefix + '_' + name : '_' + name;
             const text = lab.isDesignation ? lab.new : (labelText || name);
             const pos = svgiPlace(obj.box, sizeOf(lib), geo.rot, rule && rule.anchor);
+            const textpos = svgiTextPosition(obj.box, t && t.box);
+            const toff = svgiTextOffset(textpos, geo.rot, [pos.w, pos.h]);
 
             return {
                 idx: i, include: !existing.has(name) && !!lib,
@@ -6610,7 +6669,7 @@ ${this.buildTimelineHtml(group.key)}`;
                 lib, name, prefix, text,
                 x: pos.x, y: pos.y, w: pos.w, h: pos.h,
                 rot: geo.rot, mirrored: geo.mirrored,
-                textpos: svgiTextPosition(obj.box, t && t.box),
+                textpos, textdx: toff.dx, textdy: toff.dy,
                 warnings,
             };
         });
@@ -6748,12 +6807,27 @@ ${this.buildTimelineHtml(group.key)}`;
         return null;
     }
 
+    // Library symbols rotate through CSS classes ".<namespace>.r90" etc. in the
+    // library's style.css. Seen on a 2.23 server: the INU library installed as
+    // "lib" but its CSS only targets ".inu-svg.r90" → rotation is saved but never
+    // drawn, for every viewer. Detect that so the user isn't surprised.
+    function svgiRotationCssWarning(iDoc, rows) {
+        const namespaces = [...new Set(rows.filter(r => r.include && r.rot && r.lib)
+            .map(r => r.lib.split('_')[0]))];
+        if (!namespaces.length) return '';
+        const css = [...iDoc.styleSheets].flatMap(sh => { try { return [...sh.cssRules].map(r => r.cssText); } catch (e) { return []; } }).join('\n');
+        const missing = namespaces.filter(ns => !new RegExp('\\.' + ns.replace(/[-]/g, '\\-') + '\\.r(90|270)\\b').test(css));
+        return missing.length
+            ? `\n⚠ Biblioteket "${missing.join('", "')}" saknar rotations-CSS (.${missing[0]}.r90) på den här servern — roterade symboler sparas men visas oroterade för alla tills bibliotekets style.css kompletteras.`
+            : '';
+    }
+
     function editorExistingObjectNames(iDoc, pageid) {
-        const pre = _encodeWPId(pageid) + '-2E-';
+        const pre = _wpElementIdPrefix(pageid);
         const out = new Set();
         iDoc.querySelectorAll('.wpCompObject[id]').forEach(el => {
             if (!el.id.startsWith(pre)) return;
-            out.add(el.id.slice(pre.length).replace(/-5F-/g, '_').replace(/-2E-/g, '.'));
+            out.add(_wpDecodeName(el.id.slice(pre.length)));
         });
         return out;
     }
@@ -6875,8 +6949,20 @@ ${this.buildTimelineHtml(group.key)}`;
         dl.innerHTML = libIds.map(id => `<option value="${ea(id)}">`).join('');
         overlay.appendChild(dl);
 
-        const sizeOf = lib => SVGI_SYMBOL_SIZES[lib] || editorLibSymbolSize(iDoc, lib);
+        // Prefer the size the server's own library declares; fall back to the
+        // built-in inu-svg table (keyed by symbol name, whatever the namespace).
+        const symName = lib => String(lib || '').replace(/^[^_]+_/, '');
+        const sizeOf = lib => editorLibSymbolSize(iDoc, lib) || SVGI_SYMBOL_SIZES['inu-svg_' + symName(lib)] || null;
         const libKnown = lib => !libIds.length || libIds.includes(lib);
+        // The INU library is installed as "inu-svg" on new servers but e.g. as
+        // "lib" on older ones (2.23). Map a rule's inu-svg_X to whichever
+        // installed namespace has X; inu-svg first, then lib, then any.
+        const resolveLib = lib => {
+            if (!lib || libKnown(lib)) return lib;
+            const name = symName(lib);
+            const cands = libIds.filter(id => id.endsWith('_' + name) && !/_portlet$/.test(id));
+            return cands.find(id => id.startsWith('inu-svg_')) || cands.find(id => id.startsWith('lib_')) || cands[0] || lib;
+        };
 
         const rebuild = () => {
             if (!st.extracted) return;
@@ -6886,7 +6972,15 @@ ${this.buildTimelineHtml(group.key)}`;
                 existingNames: editorExistingObjectNames(iDoc, pageid),
             });
             st.rows.forEach(r => {
+                const want = r.lib;
+                r.lib = resolveLib(r.lib);
+                if (r.lib && !libKnown(r.lib) && r.mirrored) {
+                    // e.g. CommonSensorSideRight missing in older libraries → unmirrored + warning
+                    const alt = resolveLib(svgiMirrorLib(want));
+                    if (libKnown(alt)) { r.lib = alt; r.warnings.push(symName(want) + ' saknas — använder ' + symName(alt) + ' (spegelvänd)'); }
+                }
                 if (r.lib && !libKnown(r.lib)) { r.warnings.push('Symbolen finns inte i biblioteket'); r.include = false; }
+                recalcRow(r);
             });
             renderTable(); renderStage();
         };
@@ -6902,6 +6996,8 @@ ${this.buildTimelineHtml(group.key)}`;
                 const pos = svgiPlace(r.box, sizeOf(r.lib), r.rot, rule && rule.anchor);
                 r.x = pos.x; r.y = pos.y; r.w = pos.w; r.h = pos.h;
             }
+            const off = svgiTextOffset(r.textpos, r.rot, [r.w, r.h]);
+            r.textdx = off.dx; r.textdy = off.dy;
         };
 
         function renderTable() {
@@ -6967,7 +7063,7 @@ ${this.buildTimelineHtml(group.key)}`;
             else if (f === 'text') { r.text = el.value; }
             else if (f === 'x' || f === 'y') { r[f] = parseFloat(el.value) || 0; r._posEdited = true; }
             else if (f === 'rot') { r.rot = +el.value; recalcRow(r); syncRowInputs(tr, r); }
-            else if (f === 'textpos') { r.textpos = +el.value; }
+            else if (f === 'textpos') { r.textpos = +el.value; recalcRow(r); }
             renderStage(); updateRunBtn();
         });
 
@@ -7030,10 +7126,11 @@ ${this.buildTimelineHtml(group.key)}`;
                 st.fullUrl = blobUrl(new XMLSerializer().serializeToString(svgiParseSvg(st.svgText)));
                 $id('inu-svgi-bg-btn').disabled = false;
                 rebuild();
+                const rotWarn = svgiRotationCssWarning(iDoc, st.rows);
                 const vb = st.extracted.viewBox;
                 const sizeNote = (Math.round(vb.w) !== canvasW || Math.round(vb.h) !== canvasH)
                     ? `  ⚠ SVG ${Math.round(vb.w)}×${Math.round(vb.h)} skalas till sidans ${canvasW}×${canvasH}.` : '';
-                setStatus(`${st.rows.length} objekt i ${st.extracted.layers.length} underlager (${st.extracted.layers.join(', ')}).${sizeNote}`);
+                setStatus(`${st.rows.length} objekt i ${st.extracted.layers.length} underlager (${st.extracted.layers.join(', ')}).${sizeNote}${rotWarn}`);
             } catch (err) {
                 st.extracted = null; st.rows = [];
                 renderTable(); renderStage();
@@ -7125,7 +7222,8 @@ ${this.buildTimelineHtml(group.key)}`;
                     const res = await editorCreatePageObject(pageid, {
                         objType: r.lib, name: r.name,
                         posx: r.x, posy: r.y, posz: maxZ + 1 + i,
-                        props: { prefix: r.prefix, name: r.text, textposition: r.textpos, rotation: r.rot },
+                        props: { prefix: r.prefix, name: r.text, textposition: r.textpos, rotation: r.rot,
+                                 textdx: r.textdx, textdy: r.textdy },
                     });
                     created++;
                     r.include = false; // don't create twice if the user runs again
@@ -8133,7 +8231,8 @@ ${this.buildTimelineHtml(group.key)}`;
         const findIframe = () => document.querySelector('#content iframe');
         const sample = () => {
             const f = findIframe();
-            const doc = f && f.contentDocument;
+            // ≤2.23 has no iframe: the editor lives in the top document
+            const doc = f ? f.contentDocument : (document.getElementById('wp_editpanel') ? document : null);
             const n = doc ? doc.querySelectorAll('.wpCompObject').length : 0;
             trace.push(`t${(performance.now() - t0).toFixed(0)}=${n}`);
             return n;
