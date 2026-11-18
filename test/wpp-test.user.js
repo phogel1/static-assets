@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261118.1030
-// @description  TEST build from claude/zealous-hypatia-662ehu @ a338c30 — not for production
+// @version      7.8.20261118.1048
+// @description  TEST build from claude/zealous-hypatia-662ehu @ 2bbc19a — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -2299,7 +2299,16 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
         tbEl=document.createElement('div');tbEl.className='itb';
         sumEl=document.createElement('div');sumEl.className='ism';
         const page=document.querySelector('.page.full.fulltable');
-        if(page&&page.parentElement) {
+        const wrap=document.getElementById('tagtable_wrapper');
+        // WebPort ≤2.23: .page is position:absolute (below #wp_toolbar) inside #content,
+        // and webport.css hides "#content > div" (opacity:0). Bars placed before .page
+        // would be invisible AND overlap WebPort's toolbar — put them inside the page,
+        // right above the table, instead.
+        const pageIsAbsolute = page && /^(absolute|fixed)$/.test(getComputedStyle(page).position);
+        if(pageIsAbsolute && wrap && wrap.parentElement===page) {
+            page.insertBefore(tbEl,wrap);
+            page.insertBefore(sumEl,wrap);
+        } else if(page&&page.parentElement) {
             page.parentElement.insertBefore(tbEl,page);
             page.parentElement.insertBefore(sumEl,page);
         } else {
