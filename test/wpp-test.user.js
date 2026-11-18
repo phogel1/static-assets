@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261118.0928
-// @description  TEST build from claude/zealous-hypatia-662ehu @ 0c198ec — not for production
+// @version      7.8.20261118.1030
+// @description  TEST build from claude/zealous-hypatia-662ehu @ a338c30 — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -6503,11 +6503,26 @@ ${this.buildTimelineHtml(group.key)}`;
 
     // "GT4 / BT2" → { old:'GT4', new:'BT2', isDesignation:true }
     // "Tidkanal dagdrift" → { old:'Tidkanal dagdrift', new:'Tidkanal dagdrift', isDesignation:false }
+    // Room-prefixed label (one system per room, e.g. VAV): "<rum>-<beteckning>",
+    // e.g. "3E:482-GT5", "3B:461F-ST42", "329:231-SV52". The room part always
+    // contains ":" (as written in the room heading) — that is what tells it apart
+    // from an ordinary designation.
+    const SVGI_ROOM_LABEL_RE = /^([0-9A-ZÅÄÖ]+(?::[0-9A-ZÅÄÖ]+)+)-([A-ZÅÄÖ]{1,4}\d+[A-Z0-9]*)$/i;
+
+    // "GT4 / BT2" → { old:'GT4', new:'BT2', isDesignation:true }
+    // "Tidkanal dagdrift" → { old:'Tidkanal dagdrift', new:'Tidkanal dagdrift', isDesignation:false }
+    // "3E:482-GT5" → { …, room:'3E:482', designation:'GT5', roomName:'3E_482_GT5', isDesignation:true }
     function svgiParseLabel(text) {
         const t = String(text || '').replace(/\s+/g, ' ').trim();
         const parts = t.split('/').map(s => s.trim()).filter(Boolean);
         const oldD = parts[0] || '';
         const newD = parts.length > 1 ? parts[parts.length - 1] : oldD;
+        const rm = t.match(SVGI_ROOM_LABEL_RE);
+        if (rm) {
+            // ":" → "_" in the room part, "-" (room/designation separator) → "_"
+            return { old: oldD, new: newD, isDesignation: true,
+                room: rm[1], designation: rm[2], roomName: rm[1].replace(/:/g, '_') + '_' + rm[2] };
+        }
         return { old: oldD, new: newD, isDesignation: /^[A-ZÅÄÖ]{1,4}\d+[A-Z0-9:._-]*$/i.test(newD) };
     }
 
@@ -6647,7 +6662,8 @@ ${this.buildTimelineHtml(group.key)}`;
             const geo = svgiDecompose(obj.m);
             if (geo.offAxis) warnings.push('Vinkel ' + Math.round(geo.deg) + '° avrundad till ' + geo.rot * 90 + '°');
 
-            const rule = svgiMatchRule(rules, obj, labelText);
+            // Room labels: match symbol rules on the designation ("GT5"), not "3E:482-GT5"
+            const rule = svgiMatchRule(rules, obj, lab.room ? lab.designation : labelText);
             let lib = rule ? rule.lib : '';
             if (!lib) warnings.push('Ingen symbol mappad');
             if (geo.mirrored) {
@@ -6657,16 +6673,25 @@ ${this.buildTimelineHtml(group.key)}`;
             }
             if (!t) warnings.push('Ingen etikett hittad');
 
-            const des = lab.isDesignation ? svgiSanitize(lab.new) : '';
-            let name = des || svgiSanitize(lab.new) || svgiSanitize(obj.id) || ('OBJ' + (i + 1));
-            let base = name, n = 2;
-            while (usedNames.has(name)) name = base + '_' + (n++);
+            let name;
+            if (lab.room) {
+                // One system per room: the room makes the name unique — never add a
+                // running number. A repeated room+designation is a drawing error.
+                name = lab.roomName;
+                if (usedNames.has(name)) warnings.push('Samma rum + beteckning förekommer flera gånger i bilden');
+            } else {
+                const des = lab.isDesignation ? svgiSanitize(lab.new) : '';
+                name = des || svgiSanitize(lab.new) || svgiSanitize(obj.id) || ('OBJ' + (i + 1));
+                let base = name, n = 2;
+                while (usedNames.has(name)) name = base + '_' + (n++);
+            }
             usedNames.add(name);
             if (existing.has(name)) warnings.push('Namnet finns redan på sidan');
             if (!lab.isDesignation && labelText) warnings.push('Etiketten är ingen beteckning — kontrollera prefix');
 
             const prefix = o.pagePrefix ? o.pagePrefix + '_' + name : '_' + name;
-            const text = lab.isDesignation ? lab.new : (labelText || name);
+            // Room labels keep the label as drawn ("3E:482-GT5"), as before this format was supported
+            const text = lab.room ? labelText : lab.isDesignation ? lab.new : (labelText || name);
             const pos = svgiPlace(obj.box, sizeOf(lib), geo.rot, rule && rule.anchor);
             const textpos = svgiTextPosition(obj.box, t && t.box);
             const toff = svgiTextOffset(textpos, geo.rot, [pos.w, pos.h]);
