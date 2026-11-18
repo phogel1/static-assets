@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261118.0743
-// @description  TEST build from claude/zealous-hypatia-662ehu @ ab89a48 — not for production
+// @version      7.8.20261118.0925
+// @description  TEST build from claude/zealous-hypatia-662ehu @ d4df0be — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -6766,7 +6766,12 @@ ${this.buildTimelineHtml(group.key)}`;
             };
 
             const dyn = svgiShowDynamik(root);
-            if (!dyn) throw new Error('Hittade inget lager "Dynamik" i SVG:n');
+            if (!dyn) {
+                const found = [...root.children].filter(svgiIsLayer).map(svgiLayerLabel);
+                throw new Error('Hittade inget lager "Dynamik" i SVG:n' +
+                    (found.length ? ` (lager i filen: ${found.map(n => '"' + n + '"').join(', ')})` : '') +
+                    '. Bilden ska följa INU-standarden för flödesbilder (docs/flodesbild-svg-standard.md).');
+            }
             const objects = [], texts = [], layers = [];
             for (const sub of [...dyn.children].filter(svgiIsLayer)) {
                 const label = svgiLayerLabel(sub);
@@ -7356,7 +7361,7 @@ ${this.buildTimelineHtml(group.key)}`;
                     ? `  ⚠ SVG ${Math.round(vb.w)}×${Math.round(vb.h)} skalas till sidans ${canvasW}×${canvasH}.` : '';
                 const layerNote = st.extracted.layers.length
                     ? `${st.rows.length} objekt i ${st.extracted.layers.length} underlager (${st.extracted.layers.join(', ')}).`
-                    : 'Dynamik-lagret har inga underlager (Fläktar, Givare, Spjäll …) — bilden följer inte INU-mallen, inget att importera.';
+                    : 'Dynamik-lagret har inga underlager (Fläktar, Givare, Spjäll …) — bilden följer inte INU-standarden för flödesbilder (docs/flodesbild-svg-standard.md), inget att importera.';
                 setStatus(`${sourceNote ? sourceNote + ': ' : ''}${layerNote}${sizeNote}${rotWarn}`);
                 return true;
             } catch (err) {
