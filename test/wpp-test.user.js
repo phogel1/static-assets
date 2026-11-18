@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261117.1458
-// @description  TEST build from claude/zealous-hypatia-662ehu @ b870e05 — not for production
+// @version      7.8.20261118.0715
+// @description  TEST build from claude/zealous-hypatia-662ehu @ 0457e00 — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -6814,12 +6814,18 @@ ${this.buildTimelineHtml(group.key)}`;
     // library's style.css. Seen on a 2.23 server: the INU library installed as
     // "lib" but its CSS only targets ".inu-svg.r90" → rotation is saved but never
     // drawn, for every viewer. Detect that so the user isn't surprised.
+    function _docCssText(doc) {
+        return [...doc.styleSheets].flatMap(sh => { try { return [...sh.cssRules].map(r => r.cssText); } catch (e) { return []; } }).join('\n');
+    }
+    function _hasRotationCss(css, ns) {
+        return new RegExp('\\.' + ns.replace(/[-]/g, '\\-') + '\\.r(90|270)\\b').test(css);
+    }
     function svgiRotationCssWarning(iDoc, rows) {
         const namespaces = [...new Set(rows.filter(r => r.include && r.rot && r.lib)
             .map(r => r.lib.split('_')[0]))];
         if (!namespaces.length) return '';
-        const css = [...iDoc.styleSheets].flatMap(sh => { try { return [...sh.cssRules].map(r => r.cssText); } catch (e) { return []; } }).join('\n');
-        const missing = namespaces.filter(ns => !new RegExp('\\.' + ns.replace(/[-]/g, '\\-') + '\\.r(90|270)\\b').test(css));
+        const css = _docCssText(iDoc);
+        const missing = namespaces.filter(ns => !_hasRotationCss(css, ns));
         return missing.length
             ? `\n⚠ Biblioteket "${missing.join('", "')}" saknar rotations-CSS (.${missing[0]}.r90) på den här servern — roterade symboler sparas men visas oroterade för alla tills bibliotekets style.css kompletteras.`
             : '';
@@ -6853,10 +6859,22 @@ ${this.buildTimelineHtml(group.key)}`;
             #inu-svgi-modal button.inu-svgi-primary { background: #0969da; color: #fff; border-color: #0969da; font-weight: 600; }
             #inu-svgi-modal button.inu-svgi-x { border: none; background: none; font-size: 18px; padding: 0 4px; }
             .inu-svgi-body { flex: 1; display: flex; min-height: 0; }
-            .inu-svgi-preview { flex: 0 0 36%; overflow: auto; padding: 10px; border-right: 1px solid #eaeef2; background: #fafbfc; }
-            #inu-svgi-stage { position: relative; transform-origin: 0 0; }
+            .inu-svgi-preview { flex: 0 0 36%; overflow: hidden; position: relative; border-right: 1px solid #eaeef2; background: #fafbfc; touch-action: none; user-select: none; -webkit-user-select: none; }
+            .inu-svgi-preview img { -webkit-user-drag: none; user-drag: none; pointer-events: none; }
+            .inu-svgi-preview.hand { cursor: grab; }
+            .inu-svgi-preview.hand .inu-svgi-ph { cursor: grab; }
+            .inu-svgi-preview.panning, .inu-svgi-preview.panning .inu-svgi-ph { cursor: grabbing !important; }
+            #inu-svgi-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+            .inu-svgi-tools { position: absolute; top: 8px; right: 8px; z-index: 3; display: flex; gap: 4px; align-items: center; background: rgba(255,255,255,.92); border: 1px solid #d0d7de; border-radius: 6px; padding: 3px 5px; }
+            #inu-svgi-modal .inu-svgi-tools button { padding: 1px 7px; font-size: 13px; line-height: 1.4; }
+            #inu-svgi-modal .inu-svgi-tools button.on { background: #ddf4ff; border-color: #0969da; }
+            .inu-svgi-tools span { font-size: 11px; color: #57606a; min-width: 38px; text-align: center; }
+            .inu-svgi-hint { position: absolute; left: 8px; bottom: 6px; z-index: 3; font-size: 10px; color: #8c959f; pointer-events: none; }
             #inu-svgi-stage img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
-            .inu-svgi-ph { position: absolute; border: 1px dashed #0969da; background: rgba(9,105,218,.06); box-sizing: border-box; cursor: pointer; }
+            /* Marks live in an unscaled layer (#inu-svgi-marks) positioned in screen
+               px on every zoom/pan, so borders and numbers stay crisp at any zoom. */
+            #inu-svgi-marks { position: absolute; inset: 0; pointer-events: none; }
+            .inu-svgi-ph { position: absolute; border: 1px dashed #0969da; background: rgba(9,105,218,.06); box-sizing: border-box; cursor: pointer; pointer-events: auto; }
             .inu-svgi-ph span { position: absolute; left: 100%; top: -2px; font-size: 9px; color: #0969da; background: rgba(255,255,255,.85); padding: 0 2px; white-space: nowrap; pointer-events: none; }
             .inu-svgi-tg { position: absolute; border: 1.5px solid #cf222e; box-sizing: border-box; pointer-events: none; }
             .inu-svgi-ph.off { border-color: #8c959f; background: none; } .inu-svgi-ph.off span { color: #8c959f; }
@@ -6921,7 +6939,18 @@ ${this.buildTimelineHtml(group.key)}`;
                     <button id="inu-svgi-bg-btn" disabled title="SVG utan Dynamik-lagret — ladda upp den under sidans inställningar (bakgrund)">Ladda ned bakgrund</button>
                 </div>
                 <div class="inu-svgi-body">
-                    <div class="inu-svgi-preview"><div id="inu-svgi-stage"></div></div>
+                    <div class="inu-svgi-preview">
+                        <div id="inu-svgi-stage"></div>
+                        <div id="inu-svgi-marks"></div>
+                        <div class="inu-svgi-tools">
+                            <button id="inu-svgi-hand" title="Hand: dra för att panorera (H)">✋</button>
+                            <button id="inu-svgi-zout" title="Zooma ut (−)">−</button>
+                            <span id="inu-svgi-zlbl">100%</span>
+                            <button id="inu-svgi-zin" title="Zooma in (+)">+</button>
+                            <button id="inu-svgi-zfit" title="Anpassa (0)">⤢</button>
+                        </div>
+                        <div class="inu-svgi-hint">Scrolla för att zooma · dra för att panorera</div>
+                    </div>
                     <div class="inu-svgi-tablewrap"><div class="inu-svgi-empty">Välj en SVG enligt INU-mallen (lager "Dynamik" med underlager och "– texter"-lager).</div></div>
                 </div>
                 <div class="inu-svgi-foot">
@@ -7082,7 +7111,71 @@ ${this.buildTimelineHtml(group.key)}`;
             const n = e.target.closest && e.target.closest('[data-i]');
             if (n) highlight(n.dataset.i, false);
         });
-        $id('inu-svgi-stage').addEventListener('click', e => {
+        // ── Preview zoom (wheel, around the cursor) + pan (drag / hand tool) ──
+        const view = { z: 1, tx: 10, ty: 10, hand: false };
+        const prevEl = overlay.querySelector('.inu-svgi-preview');
+        const applyView = () => {
+            $id('inu-svgi-stage').style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.z})`;
+            // Reposition marks in screen px (base = fit-scaled canvas coords in data-*)
+            const z = view.z;
+            $id('inu-svgi-marks').querySelectorAll('[data-bx]').forEach(n => {
+                n.style.left = (view.tx + n.dataset.bx * z) + 'px';
+                n.style.top = (view.ty + n.dataset.by * z) + 'px';
+                n.style.width = (n.dataset.bw * z) + 'px';
+                n.style.height = (n.dataset.bh * z) + 'px';
+            });
+            $id('inu-svgi-zlbl').textContent = Math.round(view.z * 100) + '%';
+        };
+        const zoomAt = (factor, mx, my) => {
+            const nz = Math.min(16, Math.max(0.5, view.z * factor));
+            view.tx = mx - (mx - view.tx) * (nz / view.z);
+            view.ty = my - (my - view.ty) * (nz / view.z);
+            view.z = nz; applyView();
+        };
+        const zoomCenter = f => zoomAt(f, prevEl.clientWidth / 2, prevEl.clientHeight / 2);
+        const fitView = () => { view.z = 1; view.tx = 10; view.ty = 10; applyView(); };
+        const setHand = on => { view.hand = on; prevEl.classList.toggle('hand', on); $id('inu-svgi-hand').classList.toggle('on', on); };
+        prevEl.addEventListener('wheel', e => {
+            if (!st.extracted) return;
+            e.preventDefault();
+            const r = prevEl.getBoundingClientRect();
+            zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top);
+        }, { passive: false });
+        let drag = null, suppressClick = false;
+        // The browser's native image drag would fire pointercancel and kill the pan
+        prevEl.addEventListener('dragstart', e => e.preventDefault());
+        prevEl.addEventListener('pointerdown', e => {
+            suppressClick = false;
+            if (!st.extracted || (e.button !== 0 && e.button !== 1) || e.target.closest('.inu-svgi-tools')) return;
+            if (e.button === 1) e.preventDefault();   // no browser autoscroll on middle click
+            drag = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty, moved: false, id: e.pointerId };
+        });
+        prevEl.addEventListener('pointermove', e => {
+            if (!drag) return;
+            const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+            if (!drag.moved && Math.hypot(dx, dy) < 4) return;   // small jitter = still a click
+            if (!drag.moved) { drag.moved = true; try { prevEl.setPointerCapture(drag.id); } catch (_) { /* ignore */ } prevEl.classList.add('panning'); }
+            view.tx = drag.tx + dx; view.ty = drag.ty + dy; applyView();
+        });
+        const endDrag = () => { if (drag && drag.moved) suppressClick = true; drag = null; prevEl.classList.remove('panning'); };
+        prevEl.addEventListener('pointerup', endDrag);
+        prevEl.addEventListener('pointercancel', endDrag);
+        $id('inu-svgi-hand').addEventListener('click', () => setHand(!view.hand));
+        $id('inu-svgi-zin').addEventListener('click', () => zoomCenter(1.25));
+        $id('inu-svgi-zout').addEventListener('click', () => zoomCenter(0.8));
+        $id('inu-svgi-zfit').addEventListener('click', fitView);
+        // Shortcuts while the pointer is over the preview (not while typing in the table)
+        overlay.addEventListener('keydown', e => {
+            if (!st.extracted || !prevEl.matches(':hover') || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+            if (e.key === 'h' || e.key === 'H') setHand(!view.hand);
+            else if (e.key === '+' || e.key === '=') zoomCenter(1.25);
+            else if (e.key === '-') zoomCenter(0.8);
+            else if (e.key === '0') fitView();
+        });
+
+        $id('inu-svgi-marks').addEventListener('click', e => {
+            if (suppressClick) { suppressClick = false; return; }   // end of a pan, not a click
+            if (view.hand) return;
             const n = e.target.closest('.inu-svgi-ph');
             if (!n) return;
             const tr = overlay.querySelector(`tr.inu-svgi-row[data-i="${n.dataset.i}"]`);
@@ -7091,19 +7184,22 @@ ${this.buildTimelineHtml(group.key)}`;
 
         function renderStage() {
             const stage = $id('inu-svgi-stage');
-            if (!st.extracted) { stage.innerHTML = ''; return; }
-            const avail = Math.max(200, overlay.querySelector('.inu-svgi-preview').clientWidth - 20);
+            if (!st.extracted) { stage.innerHTML = ''; $id('inu-svgi-marks').innerHTML = ''; return; }
+            const avail = Math.max(200, prevEl.clientWidth - 20);   // fit width at zoom 100 %
             const k = avail / canvasW;
             stage.style.width = (canvasW * k) + 'px';
             stage.style.height = (canvasH * k) + 'px';
             const src = st.showDyn ? st.fullUrl : st.bgUrl;
-            let html = `<img src="${ea(src)}" alt="">`;
+            stage.innerHTML = `<img src="${ea(src)}" alt="" draggable="false">`;
+            const d = (x, y, w, h) => `data-bx="${x * k}" data-by="${y * k}" data-bw="${w * k}" data-bh="${h * k}"`;
+            let html = '';
             st.rows.forEach((r, i) => {
                 const b = r.box, cls = !r.include ? ' off' : (r.warnings.length ? ' warn' : '');
-                html += `<div class="inu-svgi-ph${cls}" data-i="${i}" style="left:${b.x * k}px;top:${b.y * k}px;width:${b.w * k}px;height:${b.h * k}px" title="${ea(r.label)}"><span>${i + 1}</span></div>`;
-                if (r.include) html += `<div class="inu-svgi-tg" style="left:${r.x * k}px;top:${r.y * k}px;width:${r.w * k}px;height:${r.h * k}px;transform:rotate(${r.rot * 90}deg)"></div>`;
+                html += `<div class="inu-svgi-ph${cls}" data-i="${i}" ${d(b.x, b.y, b.w, b.h)} title="${ea(r.label)}"><span>${i + 1}</span></div>`;
+                if (r.include) html += `<div class="inu-svgi-tg" ${d(r.x, r.y, r.w, r.h)} style="transform:rotate(${r.rot * 90}deg)"></div>`;
             });
-            stage.innerHTML = html;
+            $id('inu-svgi-marks').innerHTML = html;
+            applyView();
         }
 
         function updateRunBtn() {
