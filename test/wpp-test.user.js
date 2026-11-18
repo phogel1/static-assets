@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261118.0925
-// @description  TEST build from claude/zealous-hypatia-662ehu @ d4df0be — not for production
+// @version      7.8.20261118.0926
+// @description  TEST build from claude/zealous-hypatia-662ehu @ 81dd6a0 — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -6473,6 +6473,7 @@ ${this.buildTimelineHtml(group.key)}`;
         { layer: '^givare', id: '_dp$',               lib: 'inu-svg_CommonSensorPressureLarge', anchor: 'bottom' },
         { layer: '^givare', id: 'filter.*_gp$',       lib: 'inu-svg_CommonSensorPressure',      anchor: 'bottom' },
         { layer: '^givare', label: '^GT3\\d\\b',     lib: 'inu-svg_CommonSensorOutdoorRight' },
+        { layer: '^givare', label: '^GN\\d',          lib: 'inu-svg_CommonSensorOccupancy' },   // närvarogivare
         { layer: '^givare', lib: 'inu-svg_CommonSensorDuct', anchor: 'bottom' },
         { layer: '^spjäll', label: '^ST7\\d',         lib: 'inu-svg_VentDamperFireNC' },
         { layer: '^spjäll', lib: 'inu-svg_VentDamperDigitalNC' },
@@ -6493,6 +6494,7 @@ ${this.buildTimelineHtml(group.key)}`;
         'inu-svg_VentDamperDigitalNC': [17, 52], 'inu-svg_HvacPump': [17, 17],
         'inu-svg_HvacValve2Way': [18, 21.5], 'inu-svg_CommonButton': [17, 17],
         'inu-svg_CommonAlarm': [15, 15], 'inu-svg_CommonIndicator': [15, 15],
+        'inu-svg_CommonSensorOccupancy': [14, 14],
     };
 
     // WebPort /Page/PageObjectProperties "textposition" values (see TEXT_POSITIONS).
