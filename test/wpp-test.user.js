@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261118.1048
-// @description  TEST build from claude/zealous-hypatia-662ehu @ 2bbc19a — not for production
+// @version      7.8.20261118.1308
+// @description  TEST build from claude/zealous-hypatia-662ehu @ ddcd97e — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -1154,7 +1154,7 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
     // lazy-fetched from TEMPLATE_BASE_URL and cached in GM storage.
     const TEMPLATE_BASE_URL = 'https://phogel1.github.io/static-assets/';
     const TEMPLATE_INDEX = {
-        version: '2026-05-04.9',
+        version: '2026-11-18.1',
         manufacturers: [
             {
                 id: 'ivprodukt', name: 'IVProdukt',
@@ -1178,6 +1178,12 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
                 id: 'swegon', name: 'Swegon',
                 models: [
                     { id: 'react', name: 'REACT GMB (VAV/CAV-spjäll, alla varianter)', file: 'swegon/react.json', category: 'Spjäll' }
+                ]
+            },
+            {
+                id: 'systemair', name: 'Systemair',
+                models: [
+                    { id: 'access5-ahu', name: 'Access 5 AHU, t.ex. Geniox (v5.5-1-01)', file: 'systemair/access5-ahu.json', category: 'AHU' }
                 ]
             },
             {
