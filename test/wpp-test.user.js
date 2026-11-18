@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261118.1321
-// @description  TEST build from claude/zealous-hypatia-662ehu @ 39efee4 — not for production
+// @version      7.8.20261118.1330
+// @description  TEST build from claude/zealous-hypatia-662ehu @ 05dfb57 — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -1154,7 +1154,7 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
     // lazy-fetched from TEMPLATE_BASE_URL and cached in GM storage.
     const TEMPLATE_BASE_URL = 'https://phogel1.github.io/static-assets/';
     const TEMPLATE_INDEX = {
-        version: '2026-11-18.2',
+        version: '2026-11-18.3',
         manufacturers: [
             {
                 id: 'ivprodukt', name: 'IVProdukt',
@@ -1256,6 +1256,34 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
     // `ioDevice` (optional): when set, overrides the resolved `device` field on
     // every tag — useful when tags share a Modbus master (e.g. Moxa) and the
     // template's `{prefix}`-substituted device isn't a real WebPort IO-device.
+    // Naming standards: a picked config option may carry `rename: { "<INU object>":
+    // "<new designation>" }` (e.g. GT1 → BT5, GP1 → BP1:A). The object is the
+    // first segment after {prefix}_ in the tag name; ':' and '-' become '_' in the
+    // name (same rule as the SVG import), while the description keeps the
+    // designation as written. All renames apply in one pass (no chaining).
+    function tplRenameMap(tpl, answers) {
+        const map = {};
+        for (const sec of ((tpl && tpl.config) || [])) {
+            const ans = answers && answers[sec.id];
+            if (ans == null) continue;
+            const picks = Array.isArray(ans) ? ans : [ans];
+            for (const opt of (sec.options || [])) {
+                if (opt.rename && picks.indexOf(opt.id) !== -1) Object.assign(map, opt.rename);
+            }
+        }
+        return map;
+    }
+    function tplApplyRename(raw, map) {
+        if (!map || !raw || typeof raw.name !== 'string') return raw;
+        const m = /^\{prefix\}_([^_]+)(_.*)?$/.exec(raw.name);
+        if (!m || !Object.prototype.hasOwnProperty.call(map, m[1])) return raw;
+        const to = String(map[m[1]]);
+        const out = Object.assign({}, raw, { name: '{prefix}_' + to.replace(/[:\-]/g, '_') + (m[2] || '') });
+        const d = typeof raw.description === 'string' ? raw.description : '';
+        if (d === m[1] || d.indexOf(m[1] + ' ') === 0) out.description = to + d.slice(m[1].length);
+        return out;
+    }
+
     function resolveTemplate(tpl, answers, prefix, slaveIds, ioDevice) {
         if (!tpl || !tpl.tags) return [];
         const chosen = new Set(Array.isArray(tpl.base) ? tpl.base : []);
@@ -1268,6 +1296,7 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
                 for (const tid of (opt.tags || [])) chosen.add(tid);
             }
         }
+        const renames = tplRenameMap(tpl, answers);
         const out = [];
         const effPrefix = (prefix && prefix.trim()) || tpl.defaultDevicePrefix || 'DEV1';
         // Each entry can be either a number (range mode → token = slaveId) or
@@ -1289,7 +1318,7 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
                 ? effPrefix
                 : (hasHash ? effPrefix.replace(/#+/, m => String(token).padStart(m.length, '0')) : (effPrefix + token));
             for (const tid of chosen) {
-                const raw = tpl.tags[tid];
+                const raw = tplApplyRename(tpl.tags[tid], renames);
                 if (!raw) { console.warn(CFG.logPrefix, 'resolveTemplate: unknown tag id', tid); continue; }
                 const resolved = {};
                 for (const k of Object.keys(raw)) {
@@ -1559,7 +1588,7 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
     // For multi-slave templates: shows one example slave (the first in slaveIds,
     // or 1 as a placeholder) so the popup stays compact — the resolved-list
     // section below the modal shows the full per-slave expansion.
-    function _tplOptionTags(tpl, opt, prefix, slaveIds) {
+    function _tplOptionTags(tpl, opt, prefix, slaveIds, answers) {
         if (!opt || !opt.tags || !opt.tags.length) return [];
         const effPrefix = (prefix && String(prefix).trim()) || tpl.defaultDevicePrefix || 'DEV1';
         const isMulti = !!tpl.multiSlave;
@@ -1570,7 +1599,7 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
             : (hasHash ? effPrefix.replace(/#+/, m => String(exampleSid).padStart(m.length, '0')) : (effPrefix + exampleSid));
         const out = [];
         for (const tid of opt.tags) {
-            const raw = tpl.tags && tpl.tags[tid];
+            const raw = tplApplyRename(tpl.tags && tpl.tags[tid], answers ? tplRenameMap(tpl, answers) : null);
             if (!raw) continue;
             const resolvedName = String(raw.name || tid).replace(/\{prefix\}/g, sp);
             const addr = raw.address || '';
@@ -1701,7 +1730,7 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
                 const infoBtn = _tplCreateInfoBtn(() => {
                     const currentId = state[sec.id];
                     const currentOpt = (sec.options || []).find(o => o.id === currentId);
-                    return _tplOptionTags(tpl, currentOpt, getPrefix && getPrefix(), getSlaves && getSlaves());
+                    return _tplOptionTags(tpl, currentOpt, getPrefix && getPrefix(), getSlaves && getSlaves(), state);
                 });
                 row.appendChild(infoBtn);
                 cell.appendChild(row);
@@ -1753,7 +1782,7 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
                 const txt = document.createElement('span');
                 txt.textContent = opt.label || opt.id;
                 lab.appendChild(txt);
-                const infoBtn = _tplCreateInfoBtn(() => _tplOptionTags(tpl, opt, getPrefix && getPrefix(), getSlaves && getSlaves()));
+                const infoBtn = _tplCreateInfoBtn(() => _tplOptionTags(tpl, opt, getPrefix && getPrefix(), getSlaves && getSlaves(), state));
                 lab.appendChild(infoBtn);
                 opts.appendChild(lab);
             }
