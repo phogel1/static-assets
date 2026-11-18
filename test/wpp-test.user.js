@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261118.0719
-// @description  TEST build from claude/zealous-hypatia-662ehu @ d113c2e — not for production
+// @version      7.8.20261118.0728
+// @description  TEST build from claude/zealous-hypatia-662ehu @ 44811cc — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -7702,6 +7702,7 @@ ${this.buildTimelineHtml(group.key)}`;
 
             injectEditorStyles(iDoc);
             injectEditorToolbar(iframe);
+            hideEditorLoadingChip();
 
             if (!inuOff('grid')) editorApplyGrid();
             editorLoadLocks();
@@ -7834,7 +7835,7 @@ ${this.buildTimelineHtml(group.key)}`;
             const t = setInterval(() => {
                 att++;
                 if (iframe.contentDocument?.querySelector('.wpCompObject')) { clearInterval(t); setup(); }
-                else if (att > 15 && iframe.contentDocument?.getElementById('wpp')) {
+                else if (att > 3 && iframe.contentDocument?.getElementById('wpp')) {
                     // Page loaded but has no symbols (new page) → toolbar anyway
                     clearInterval(t); setup(true);
                 }
@@ -8414,12 +8415,14 @@ ${this.buildTimelineHtml(group.key)}`;
     // mortem whether stability detection was holding off long enough.
     function _waitForEditorIframeReady(cb) {
         const STABLE_FRAMES = 3;     // ~300 ms of "no new symbols arriving"
+        const EMPTY_FRAMES = 12;     // ~1.2 s of a loaded editor with zero symbols
         const POLL_MS = 100;
         const SAFETY_MS = 8000;
         const t0 = performance.now();
         let fired = false;
         let lastN = -1;
         let stable = 0;
+        let zeroStable = 0;           // polls with a loaded editor and no symbols at all
         const trace = []; // recent (elapsed, count) samples for the debug log
 
         const fire = (reason) => {
@@ -8432,16 +8435,26 @@ ${this.buildTimelineHtml(group.key)}`;
             requestAnimationFrame(() => requestAnimationFrame(cb));
         };
         const findIframe = () => document.querySelector('#content iframe');
+        let lastDoc = null;
         const sample = () => {
             const f = findIframe();
             // ≤2.23 has no iframe: the editor lives in the top document
             const doc = f ? f.contentDocument : (document.getElementById('wp_editpanel') ? document : null);
+            lastDoc = doc;
             const n = doc ? doc.querySelectorAll('.wpCompObject').length : 0;
             trace.push(`t${(performance.now() - t0).toFixed(0)}=${n}`);
             return n;
         };
         const check = () => {
             const n = sample();
+            // Empty (e.g. brand-new) page: editor fully loaded and still no symbols
+            // after ~1.2 s → nothing to race with, don't sit out the 8 s timeout.
+            if (n === 0 && lastDoc && lastDoc.readyState === 'complete' &&
+                lastDoc.getElementById('wp_editpanel') && lastDoc.getElementById('wpp')) {
+                if (++zeroStable >= EMPTY_FRAMES) { fire('empty page'); return true; }
+            } else {
+                zeroStable = 0;
+            }
             if (n > 0 && n === lastN) {
                 stable++;
                 if (stable >= STABLE_FRAMES) { fire('stable'); return true; }
@@ -8470,6 +8483,32 @@ ${this.buildTimelineHtml(group.key)}`;
         }, SAFETY_MS);
     }
 
+    // Shown at once when entering edit mode, removed when the toolbar is in.
+    // Fixed-position in the TOP document so it never shifts the editor layout
+    // (which is what the ready-wait protects against).
+    function showEditorLoadingChip() {
+        try {
+            if (!document.body) {   // script can run before <body> exists — retry once it does
+                document.addEventListener('DOMContentLoaded', showEditorLoadingChip, { once: true });
+                return;
+            }
+            if (document.getElementById('inu-editor-loading') || document.getElementById('inu-editor-toolbar') ||
+                _editorIframe?.contentDocument?.getElementById('inu-editor-toolbar')) return;
+            _showEditorLoadingChip();
+        } catch (e) { /* cosmetic only — must never block editor init */ }
+    }
+    function _showEditorLoadingChip() {
+        const chip = document.createElement('div');
+        chip.id = 'inu-editor-loading';
+        chip.textContent = 'WPP+ laddar editorverktyg…';
+        chip.style.cssText = 'position:fixed;top:62px;right:18px;z-index:100000;background:#1e293b;color:#e2e8f0;' +
+            'font:12px system-ui,sans-serif;padding:5px 11px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.3);' +
+            'pointer-events:none;opacity:.92';
+        document.body.appendChild(chip);
+        setTimeout(hideEditorLoadingChip, 20000);   // never linger
+    }
+    function hideEditorLoadingChip() { document.getElementById('inu-editor-loading')?.remove(); }
+
     function _routePage() {
         if (isInuTagPage())     { _maybeInjectBrandPill(); _initInuTagPage(); return true; }
         if (isDevicePage())     { _maybeInjectBrandPill(); initDevicePage();  return true; }
@@ -8477,6 +8516,7 @@ ${this.buildTimelineHtml(group.key)}`;
             // Edit mode: defer all top-window DOM work until WebPort's iframe
             // has actually rendered its symbols. Earlier we used a fixed 1500 ms
             // timer which mostly worked but still raced occasionally.
+            if (!inuOff('editor')) showEditorLoadingChip();
             _waitForEditorIframeReady(() => {
                 if (!inuOff('editor')) initPageEditor();
                 if (!inuOff('tooltip')) initDiagramTooltip();
@@ -8541,6 +8581,7 @@ ${this.buildTimelineHtml(group.key)}`;
         }
         // Also remove toolbar from outer page (fallback injection path)
         document.getElementById('inu-editor-toolbar')?.remove();
+        hideEditorLoadingChip();
         // Detach the iframe-load listener so it doesn't accumulate across
         // pageid changes (WebPort reuses the iframe element, not just its doc).
         if (_editorIframe && _editorIframe.__inuEditorLoadListener) {
