@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261118.0715
-// @description  TEST build from claude/zealous-hypatia-662ehu @ 0457e00 — not for production
+// @version      7.8.20261118.0719
+// @description  TEST build from claude/zealous-hypatia-662ehu @ d113c2e — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -6214,7 +6214,7 @@ ${this.buildTimelineHtml(group.key)}`;
         }
     }
 
-    function editorShowSymbolPicker(iDoc, onSelect) {
+    function editorShowSymbolPicker(iDoc, onSelect, initialNs) {
         if (iDoc.getElementById('inu-sym-picker')) return;
 
         // Discover all namespaces dynamically
@@ -6326,7 +6326,10 @@ ${this.buildTimelineHtml(group.key)}`;
             search.value = '';
         };
 
-        buildGrid(namespaces[0]);
+        const startNs = namespaces.includes(initialNs) ? initialNs : namespaces[0];
+        libSel.value = startNs;
+        buildGrid(startNs);
+        picker.style.zIndex = '100001';   // above the SVG-import dialog (100000)
         modal.append(header, bodyDiv);
         picker.appendChild(modal);
         iDoc.body.appendChild(picker);
@@ -6831,6 +6834,28 @@ ${this.buildTimelineHtml(group.key)}`;
             : '';
     }
 
+    // Clone a library symbol's icon (svg or img) from the editor's library
+    // panel, sized to fill its container. null if the symbol isn't installed.
+    function editorLibIcon(iDoc, lib) {
+        const el = lib && iDoc.getElementById(lib);
+        if (!el || !el.classList.contains('libitem')) return null;
+        const src = el.querySelector('svg') || el.querySelector('img');
+        if (!src) return null;
+        const c = src.cloneNode(true);
+        c.removeAttribute('id');
+        c.removeAttribute('style');
+        if (c.tagName.toLowerCase() === 'svg') {
+            if (!c.getAttribute('viewBox')) {
+                const w = parseFloat(src.getAttribute('width')), h = parseFloat(src.getAttribute('height'));
+                if (w > 0 && h > 0) c.setAttribute('viewBox', `0 0 ${w} ${h}`);
+            }
+            c.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        }
+        c.setAttribute('width', '100%'); c.setAttribute('height', '100%');
+        c.style.cssText = 'width:100%;height:100%;display:block;pointer-events:none;object-fit:contain';
+        return c;
+    }
+
     function editorExistingObjectNames(iDoc, pageid) {
         const pre = _wpElementIdPrefix(pageid);
         const out = new Set();
@@ -6879,14 +6904,27 @@ ${this.buildTimelineHtml(group.key)}`;
             .inu-svgi-tg { position: absolute; border: 1.5px solid #cf222e; box-sizing: border-box; pointer-events: none; }
             .inu-svgi-ph.off { border-color: #8c959f; background: none; } .inu-svgi-ph.off span { color: #8c959f; }
             .inu-svgi-ph.warn { border-color: #bf8700; background: rgba(191,135,0,.1); }
-            .inu-svgi-ph.hl, .inu-svgi-row.hl td { background: rgba(255,214,10,.35) !important; }
+            .inu-svgi-row.hl td { background: rgba(255,214,10,.35) !important; }
+            /* Hovered row ↔ its placeholder + symbol in the preview */
+            .inu-svgi-ph.hl { border: 2px solid #f57c00 !important; background: rgba(255,167,38,.28) !important; box-shadow: 0 0 0 3px rgba(245,124,0,.35), 0 0 12px 2px rgba(245,124,0,.55); z-index: 2; }
+            .inu-svgi-ph.hl span { color: #fff; background: #f57c00; font-weight: 600; }
+            .inu-svgi-sym.hl { opacity: 1; z-index: 2; filter: drop-shadow(0 0 2px #f57c00) drop-shadow(0 0 4px #f57c00); }
+            .inu-svgi-tg.hl { border: 2px solid #f57c00 !important; z-index: 2; }
             .inu-svgi-tablewrap { flex: 1; overflow: auto; }
             #inu-svgi-table { border-collapse: collapse; width: 100%; }
             #inu-svgi-table th { position: sticky; top: 0; background: #f6f8fa; text-align: left; padding: 5px 4px; border-bottom: 1px solid #d0d7de; font-weight: 600; white-space: nowrap; z-index: 1; }
             #inu-svgi-table td { padding: 2px 4px; border-bottom: 1px solid #f0f2f4; vertical-align: middle; }
             #inu-svgi-table tr.off td { opacity: .45; }
             #inu-svgi-table input[type=text] { width: 100%; box-sizing: border-box; min-width: 60px; }
-            #inu-svgi-table input.inu-svgi-lib { min-width: 200px; }
+            #inu-svgi-table input.inu-svgi-lib { min-width: 190px; }
+            #inu-svgi-table td.sym { white-space: nowrap; }
+            #inu-svgi-table td.sym > * { vertical-align: middle; }
+            #inu-svgi-table td.sym input { width: calc(100% - 66px); }
+            .inu-svgi-ico { display: inline-block; width: 24px; height: 24px; margin-right: 4px; border: 1px solid #eaeef2; border-radius: 3px; background: #fff; padding: 1px; box-sizing: border-box; }
+            .inu-svgi-ico.missing { background: repeating-linear-gradient(45deg, #fff, #fff 3px, #ffebe9 3px, #ffebe9 6px); }
+            #inu-svgi-modal td.sym button.inu-svgi-pick { padding: 2px 6px; margin-left: 3px; }
+            .inu-svgi-sym { position: absolute; pointer-events: none; opacity: .9; }
+            .inu-svgi-tg.has-sym { border-color: rgba(207,34,46,.35); border-style: dotted; }
             #inu-svgi-table input[data-f=prefix] { min-width: 130px; }
             #inu-svgi-table input[type=number] { width: 52px; }
             #inu-svgi-table td.layer { color: #57606a; white-space: nowrap; }
@@ -7056,7 +7094,7 @@ ${this.buildTimelineHtml(group.key)}`;
                     <td><input type="checkbox" data-f="include"${r.include ? ' checked' : ''}></td>
                     <td>${i + 1}</td>
                     <td class="layer" title="${ea(r.svgId)}">${escHtml(r.label || '—')}</td>
-                    <td><input type="text" class="inu-svgi-lib" data-f="lib" list="inu-svgi-libs" value="${ea(r.lib)}"></td>
+                    <td class="sym"><span class="inu-svgi-ico"></span><input type="text" class="inu-svgi-lib" data-f="lib" list="inu-svgi-libs" value="${ea(r.lib)}"><button class="inu-svgi-pick" title="Välj symbol med förhandsvisning…">⋯</button></td>
                     <td><input type="text" data-f="name" value="${ea(r.name)}"></td>
                     <td><input type="text" data-f="prefix" value="${ea(r.prefix)}"></td>
                     <td><input type="text" data-f="text" value="${ea(r.text)}"></td>
@@ -7068,6 +7106,7 @@ ${this.buildTimelineHtml(group.key)}`;
                 </tr>`;
             });
             wrap.innerHTML = html + '</tbody></table>';
+            wrap.querySelectorAll('tr.inu-svgi-row').forEach(tr => setRowIcon(tr, st.rows[+tr.dataset.i]));
             const all = $id('inu-svgi-all');
             all.checked = st.rows.every(r => r.include);
             all.addEventListener('change', () => {
@@ -7076,6 +7115,40 @@ ${this.buildTimelineHtml(group.key)}`;
             });
             updateRunBtn();
         }
+
+        function setRowIcon(tr, r) {
+            const box = tr.querySelector('.inu-svgi-ico');
+            if (!box) return;
+            box.textContent = '';
+            const ico = editorLibIcon(iDoc, r.lib);
+            box.classList.toggle('missing', !ico);
+            box.title = ico ? r.lib.replace(/^[^_]+_/, '') : 'Symbolen finns inte i biblioteket';
+            if (ico) box.appendChild(ico);
+        }
+        const MISSING_WARN = 'Symbolen finns inte i biblioteket';
+        function setRowLib(tr, r, lib) {
+            r.lib = lib;
+            const known = !!lib && libKnown(lib);
+            const hadMissing = r.warnings.includes(MISSING_WARN);
+            r.warnings = r.warnings.filter(w => w !== MISSING_WARN && w !== 'Ingen symbol mappad');
+            if (!known) r.warnings.push(lib ? MISSING_WARN : 'Ingen symbol mappad');
+            if (known && hadMissing) r.include = true;      // re-enable a row we disabled for a missing symbol
+            if (!known) r.include = false;
+            recalcRow(r);
+            tr.querySelector('[data-f=lib]').value = r.lib;
+            tr.querySelector('[data-f=include]').checked = r.include;
+            tr.classList.toggle('off', !r.include);
+            tr.querySelector('td.warn').innerHTML = r.warnings.map(escHtml).join('<br>');
+            syncRowInputs(tr, r); setRowIcon(tr, r);
+            renderStage(); updateRunBtn();
+        }
+        overlay.addEventListener('click', e => {
+            const btn = e.target.closest && e.target.closest('.inu-svgi-pick');
+            if (!btn) return;
+            const tr = btn.closest('tr.inu-svgi-row'), r = st.rows[+tr.dataset.i];
+            const ns = (r.lib || '').split('_')[0] || (libIds.find(id => /^(inu-svg|lib)_/.test(id)) || '').split('_')[0];
+            editorShowSymbolPicker(iDoc, id => setRowLib(tr, r, id), ns);
+        });
 
         function syncRowInputs(tr, r) {
             tr.querySelector('[data-f=prefix]').value = r.prefix;
@@ -7089,7 +7162,7 @@ ${this.buildTimelineHtml(group.key)}`;
             if (!f || !tr) return;
             const r = st.rows[+tr.dataset.i];
             if (f === 'include') { r.include = el.checked; tr.classList.toggle('off', !r.include); }
-            else if (f === 'lib') { r.lib = el.value.trim(); recalcRow(r); syncRowInputs(tr, r); }
+            else if (f === 'lib') { setRowLib(tr, r, el.value.trim()); }
             else if (f === 'name') { r.name = svgiSanitize(el.value) || r.name; el.value = r.name; recalcRow(r); syncRowInputs(tr, r); }
             else if (f === 'prefix') { r.prefix = el.value.trim(); r._prefixEdited = true; }
             else if (f === 'text') { r.text = el.value; }
@@ -7101,15 +7174,37 @@ ${this.buildTimelineHtml(group.key)}`;
 
         // Hover a row ↔ highlight placeholder in the preview
         const highlight = (i, on) => {
-            overlay.querySelectorAll(`[data-i="${i}"]`).forEach(n => n.classList.toggle('hl', on));
+            overlay.querySelectorAll(`[data-i="${i}"], [data-sym="${i}"], [data-tg="${i}"]`)
+                .forEach(n => n.classList.toggle('hl', on));
+        };
+        // Hovering a TABLE row for a moment pans the preview to that object if it
+        // is outside the visible (zoomed) area.
+        let revealTimer = null;
+        const revealInPreview = i => {
+            const ph = overlay.querySelector(`.inu-svgi-ph[data-i="${i}"]`);
+            if (!ph || !st.extracted) return;
+            const pr = prevEl.getBoundingClientRect(), r = ph.getBoundingClientRect();
+            const inside = r.right > pr.left + 10 && r.left < pr.right - 10 && r.bottom > pr.top + 10 && r.top < pr.bottom - 10;
+            if (inside) return;
+            const cx = (+ph.dataset.bx + ph.dataset.bw / 2), cy = (+ph.dataset.by + ph.dataset.bh / 2);
+            view.tx = prevEl.clientWidth / 2 - cx * view.z;
+            view.ty = prevEl.clientHeight / 2 - cy * view.z;
+            applyView();
         };
         overlay.addEventListener('mouseover', e => {
             const n = e.target.closest && e.target.closest('[data-i]');
-            if (n) highlight(n.dataset.i, true);
+            if (!n) return;
+            highlight(n.dataset.i, true);
+            if (n.tagName === 'TR') {
+                clearTimeout(revealTimer);
+                revealTimer = setTimeout(() => revealInPreview(n.dataset.i), 450);
+            }
         });
         overlay.addEventListener('mouseout', e => {
             const n = e.target.closest && e.target.closest('[data-i]');
-            if (n) highlight(n.dataset.i, false);
+            if (!n) return;
+            highlight(n.dataset.i, false);
+            if (n.tagName === 'TR' && !(e.relatedTarget && n.contains(e.relatedTarget))) clearTimeout(revealTimer);
         });
         // ── Preview zoom (wheel, around the cursor) + pan (drag / hand tool) ──
         const view = { z: 1, tx: 10, ty: 10, hand: false };
@@ -7196,9 +7291,18 @@ ${this.buildTimelineHtml(group.key)}`;
             st.rows.forEach((r, i) => {
                 const b = r.box, cls = !r.include ? ' off' : (r.warnings.length ? ' warn' : '');
                 html += `<div class="inu-svgi-ph${cls}" data-i="${i}" ${d(b.x, b.y, b.w, b.h)} title="${ea(r.label)}"><span>${i + 1}</span></div>`;
-                if (r.include) html += `<div class="inu-svgi-tg" ${d(r.x, r.y, r.w, r.h)} style="transform:rotate(${r.rot * 90}deg)"></div>`;
+                if (r.include) {
+                    html += `<div class="inu-svgi-sym" data-sym="${i}" ${d(r.x, r.y, r.w, r.h)} style="transform:rotate(${r.rot * 90}deg)"></div>`;
+                    html += `<div class="inu-svgi-tg" data-tg="${i}" ${d(r.x, r.y, r.w, r.h)} style="transform:rotate(${r.rot * 90}deg)"></div>`;
+                }
             });
-            $id('inu-svgi-marks').innerHTML = html;
+            const marks = $id('inu-svgi-marks');
+            marks.innerHTML = html;
+            // Real symbol in place of the target box; keep the red box only if it's missing
+            marks.querySelectorAll('[data-sym]').forEach(n => {
+                const ico = editorLibIcon(iDoc, st.rows[+n.dataset.sym].lib);
+                if (ico) { n.appendChild(ico); marks.querySelector(`[data-tg="${n.dataset.sym}"]`)?.classList.add('has-sym'); }
+            });
             applyView();
         }
 
