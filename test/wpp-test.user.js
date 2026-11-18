@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261118.0728
-// @description  TEST build from claude/zealous-hypatia-662ehu @ 44811cc — not for production
+// @version      7.8.20261118.0743
+// @description  TEST build from claude/zealous-hypatia-662ehu @ ab89a48 — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -6708,6 +6708,28 @@ ${this.buildTimelineHtml(group.key)}`;
             || null;
     }
 
+    // Make the Dynamik layer and its sub-layers visible. The SVG uploaded as page
+    // background usually has Dynamik hidden (display:none in Inkscape), and hidden
+    // elements have no geometry to measure. Objects hidden one by one stay hidden.
+    function svgiShowDynamik(root) {
+        const dyn = svgiFindDynamik(root);
+        if (!dyn) return null;
+        [dyn, ...[...dyn.children].filter(svgiIsLayer)].forEach(g => {
+            const st = g.getAttribute('style');
+            if (st) g.setAttribute('style', st.replace(/(^|;)\s*(display\s*:\s*none|visibility\s*:\s*hidden)\s*(?=;|$)/gi, '$1'));
+            if (g.getAttribute('display') === 'none') g.removeAttribute('display');
+            if (g.getAttribute('visibility') === 'hidden') g.removeAttribute('visibility');
+        });
+        return dyn;
+    }
+
+    // Same SVG with the Dynamik layer shown (for the "show Dynamik" preview).
+    function svgiFullSvg(svgText) {
+        const doc = svgiParseSvg(svgText);
+        svgiShowDynamik(doc.documentElement);
+        return new XMLSerializer().serializeToString(doc);
+    }
+
     // Measure every Dynamik placeholder and label. hostDoc = a live document to
     // render into (getBBox/getScreenCTM need layout). canvasW/H = WebPort page size.
     function svgiExtract(svgText, hostDoc, canvasW, canvasH) {
@@ -6743,7 +6765,7 @@ ${this.buildTimelineHtml(group.key)}`;
                 }
             };
 
-            const dyn = svgiFindDynamik(root);
+            const dyn = svgiShowDynamik(root);
             if (!dyn) throw new Error('Hittade inget lager "Dynamik" i SVG:n');
             const objects = [], texts = [], layers = [];
             for (const sub of [...dyn.children].filter(svgiIsLayer)) {
@@ -6957,7 +6979,7 @@ ${this.buildTimelineHtml(group.key)}`;
 
         const st = {
             svgText: '', fileName: '', extracted: null, rows: [],
-            rules: svgiLoadRules(), showDyn: false, bgUrl: '', fullUrl: '', running: false,
+            rules: svgiLoadRules(), showDyn: false, bgUrl: '', fullUrl: '', running: false, loadSeq: 0,
         };
 
         const overlay = iDoc.createElement('div');
@@ -6969,7 +6991,8 @@ ${this.buildTimelineHtml(group.key)}`;
                     <button class="inu-svgi-x" id="inu-svgi-close" title="Stäng">×</button>
                 </div>
                 <div class="inu-svgi-bar">
-                    <input type="file" id="inu-svgi-file" accept=".svg,image/svg+xml">
+                    <button id="inu-svgi-frompage" title="Läs SVG:n som redan är sidans bakgrund (Sidinställningar → bakgrund)">Hämta från sidan</button>
+                    <input type="file" id="inu-svgi-file" accept=".svg,image/svg+xml" title="…eller ladda upp en lokal SVG">
                     <label>Prefix <input type="text" id="inu-svgi-prefix" style="width:110px" placeholder="t.ex. LB02" value="${ea(savedPrefixes[pageid] || '')}"
                         title="Taggprefix före beteckningen: LB02 → LB02_BT2. Tomt = relativt prefix _BT2 (WebPort lägger till sidans prefix)."></label>
                     <label><input type="checkbox" id="inu-svgi-showdyn"> Visa Dynamik i förhandsvisningen</label>
@@ -7314,33 +7337,89 @@ ${this.buildTimelineHtml(group.key)}`;
             btn.textContent = n ? `Lägg in ${n} objekt` : 'Lägg in';
         }
 
-        $id('inu-svgi-file').addEventListener('change', async e => {
-            const file = e.target.files && e.target.files[0];
-            if (!file) return;
-            setStatus('Läser ' + file.name + '…');
+        // One load path for both sources (uploaded file / the page's own background)
+        async function loadSvgText(text, name, sourceNote) {
             try {
-                st.svgText = await file.text();
-                st.fileName = file.name;
+                st.svgText = text;
+                st.fileName = name;
                 // Measure in the iframe document: it is a live, laid-out document.
                 st.extracted = svgiExtract(st.svgText, iDoc, canvasW, canvasH);
                 [st.bgUrl, st.fullUrl].forEach(u => u && URL.revokeObjectURL(u));
                 const blobUrl = txt => URL.createObjectURL(new Blob([txt], { type: 'image/svg+xml' }));
                 st.bgUrl = blobUrl(svgiBackgroundSvg(st.svgText));
-                st.fullUrl = blobUrl(new XMLSerializer().serializeToString(svgiParseSvg(st.svgText)));
+                st.fullUrl = blobUrl(svgiFullSvg(st.svgText));
                 $id('inu-svgi-bg-btn').disabled = false;
                 rebuild();
                 const rotWarn = svgiRotationCssWarning(iDoc, st.rows);
                 const vb = st.extracted.viewBox;
                 const sizeNote = (Math.round(vb.w) !== canvasW || Math.round(vb.h) !== canvasH)
                     ? `  ⚠ SVG ${Math.round(vb.w)}×${Math.round(vb.h)} skalas till sidans ${canvasW}×${canvasH}.` : '';
-                setStatus(`${st.rows.length} objekt i ${st.extracted.layers.length} underlager (${st.extracted.layers.join(', ')}).${sizeNote}${rotWarn}`);
+                const layerNote = st.extracted.layers.length
+                    ? `${st.rows.length} objekt i ${st.extracted.layers.length} underlager (${st.extracted.layers.join(', ')}).`
+                    : 'Dynamik-lagret har inga underlager (Fläktar, Givare, Spjäll …) — bilden följer inte INU-mallen, inget att importera.';
+                setStatus(`${sourceNote ? sourceNote + ': ' : ''}${layerNote}${sizeNote}${rotWarn}`);
+                return true;
             } catch (err) {
                 st.extracted = null; st.rows = [];
                 renderTable(); renderStage();
-                setStatus('Fel: ' + err.message);
+                setStatus((sourceNote ? sourceNote + ': ' : '') + 'Fel: ' + err.message +
+                    (/Dynamik/.test(err.message) ? ' — välj originalfilen med Dynamik-lagret i stället.' : ''));
                 console.warn(CFG.logPrefix, 'svg import', err);
+                return false;
             }
+        }
+
+        $id('inu-svgi-file').addEventListener('change', async e => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            const seq = ++st.loadSeq;   // newest load wins (e.g. upload while the page fetch runs)
+            setStatus('Läser ' + file.name + '…');
+            const text = await file.text();
+            if (seq === st.loadSeq) await loadSvgText(text, file.name, '');
         });
+
+        // The page's current background SVG: preferably the original file named in
+        // the page properties (/system/backgrounds/…svg), else the SVG WebPort has
+        // inlined into the editor (.wp_svgbackground). Both keep the Inkscape layers.
+        async function fetchPageSvg() {
+            try {
+                const html = await (await fetch('/Page/PageProperties?pageid=' + encodeURIComponent(pageid))).text();
+                const d = new DOMParser().parseFromString(html, 'text/html');   // inert: no scripts / image loads
+                const sel = [...d.querySelectorAll('select[name="background"]')].find(x => x.value);
+                const url = sel && sel.value;
+                if (url && /\.svg$/i.test(url)) {
+                    let path = url; try { path = decodeURI(url); } catch (_) { /* keep as is */ }
+                    const res = await fetch(encodeURI(path));
+                    const text = res.ok ? await res.text() : '';
+                    if (/<svg[\s>]/i.test(text)) return { text, name: path.split('/').pop() };
+                }
+            } catch (e) { console.warn(CFG.logPrefix, 'page background via PageProperties failed', e); }
+            const inl = iDoc.querySelector('.wp_svgbackground svg, .systembackground svg');
+            if (inl) {
+                // Inline SVG lives in an HTML document; make sure the inkscape prefix is declared
+                const c = inl.cloneNode(true);
+                if (!c.getAttribute('xmlns:inkscape')) c.setAttribute('xmlns:inkscape', 'http://www.inkscape.org/namespaces/inkscape');
+                if (!c.getAttribute('xmlns:sodipodi')) c.setAttribute('xmlns:sodipodi', 'http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd');
+                return { text: new XMLSerializer().serializeToString(c), name: 'sidans bakgrund.svg' };
+            }
+            return null;
+        }
+        async function loadFromPage(auto) {
+            const btn = $id('inu-svgi-frompage');
+            const seq = ++st.loadSeq;
+            btn.disabled = true;
+            if (!auto) setStatus('Hämtar sidans bakgrund…');
+            try {
+                const got = await fetchPageSvg();
+                if (seq !== st.loadSeq) return;   // the user picked a file meanwhile
+                if (!got) { setStatus(auto ? '' : 'Sidan har ingen SVG-bakgrund — ladda upp filen i stället.'); return; }
+                $id('inu-svgi-file').value = '';
+                await loadSvgText(got.text, got.name, 'Från sidan (' + got.name + ')');
+            } finally { btn.disabled = false; }
+        }
+        $id('inu-svgi-frompage').addEventListener('click', () => loadFromPage(false));
+
+        loadFromPage(true);   // most pages already have the diagram as background
 
         $id('inu-svgi-prefix').addEventListener('change', e => {
             savedPrefixes[pageid] = e.target.value.trim();
