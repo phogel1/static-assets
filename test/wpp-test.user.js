@@ -2,8 +2,8 @@
 // @name         INU WebPort-Plus (TEST)
 // @namespace    http://tampermonkey.net/inu-wpp-test
 // @author       Andreas Engstrand
-// @version      7.8.20261118.1330
-// @description  TEST build from claude/zealous-hypatia-662ehu @ 05dfb57 — not for production
+// @version      7.8.20261118.1335
+// @description  TEST build from claude/zealous-hypatia-662ehu @ 9c91fec — not for production
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -1154,7 +1154,7 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
     // lazy-fetched from TEMPLATE_BASE_URL and cached in GM storage.
     const TEMPLATE_BASE_URL = 'https://phogel1.github.io/static-assets/';
     const TEMPLATE_INDEX = {
-        version: '2026-11-18.3',
+        version: '2026-11-18.4',
         manufacturers: [
             {
                 id: 'ivprodukt', name: 'IVProdukt',
@@ -1282,6 +1282,17 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
         const d = typeof raw.description === 'string' ? raw.description : '';
         if (d === m[1] || d.indexOf(m[1] + ' ') === 0) out.description = to + d.slice(m[1].length);
         return out;
+    }
+
+    // Rewrite INU designations inside free UI text (labels, help) with the active
+    // naming map, e.g. "GT1/GT3/GT4 ingår alltid" → "BT5/BT1/BT2 ingår alltid".
+    // Whole designations only: GT1 never matches inside GT11.
+    function tplRenameText(text, map) {
+        if (!text || !map) return text;
+        const keys = Object.keys(map).sort((a, b) => b.length - a.length);
+        if (!keys.length) return text;
+        const re = new RegExp('(^|[^A-ZÅÄÖ0-9])(' + keys.join('|') + ')(?![A-ZÅÄÖ0-9])', 'g');
+        return String(text).replace(re, (m, pre, k) => pre + map[k]);
     }
 
     function resolveTemplate(tpl, answers, prefix, slaveIds, ioDevice) {
@@ -1678,6 +1689,12 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
             container.appendChild(msg);
             return;
         }
+        // Active naming standard (e.g. Systemair BT5 instead of GT1): applied to
+        // labels and help text. The section that holds the rename options keeps
+        // its own text, since it describes both standards.
+        const rmap = tplRenameMap(tpl, state);
+        const hasRename = sec => (sec.options || []).some(o => o.rename);
+        const rt = (sec, txt) => hasRename(sec) ? txt : tplRenameText(txt, rmap);
 
         // Group single-select sections into a compact grid at the top; stack
         // multiselects vertically below. This keeps the "structural" questions
@@ -1694,7 +1711,7 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
                 cell.className = 'tpl-dd-cell';
                 const lbl = document.createElement('label');
                 lbl.className = 'tpl-dd-lbl';
-                lbl.textContent = sec.label || sec.id;
+                lbl.textContent = rt(sec, sec.label || sec.id);
                 cell.appendChild(lbl);
                 const row = document.createElement('div');
                 row.className = 'tpl-dd-row';
@@ -1703,7 +1720,7 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
                 for (const opt of (sec.options || [])) {
                     const o = document.createElement('option');
                     o.value = opt.id;
-                    o.textContent = opt.label || opt.id;
+                    o.textContent = rt(sec, opt.label || opt.id);
                     if (state[sec.id] === opt.id) o.selected = true;
                     sel.appendChild(o);
                 }
@@ -1737,7 +1754,7 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
                 if (sec.help) {
                     const h = document.createElement('div');
                     h.className = 'tpl-dd-help';
-                    h.textContent = sec.help;
+                    h.textContent = rt(sec, sec.help);
                     cell.appendChild(h);
                 }
                 grid.appendChild(cell);
@@ -1750,12 +1767,12 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
             sEl.className = 'tpl-sec';
             const lbl = document.createElement('div');
             lbl.className = 'tpl-sec-lbl';
-            lbl.textContent = sec.label || sec.id;
+            lbl.textContent = rt(sec, sec.label || sec.id);
             sEl.appendChild(lbl);
             if (sec.help) {
                 const h = document.createElement('div');
                 h.className = 'tpl-sec-help';
-                h.textContent = sec.help;
+                h.textContent = rt(sec, sec.help);
                 sEl.appendChild(h);
             }
             const opts = document.createElement('div');
@@ -1776,11 +1793,14 @@ tr.tag.inu-dupe > td:nth-child(${OFF+3}) { background:rgba(255,152,0,.25) !impor
                     const idx = arr.indexOf(opt.id);
                     if (inp.checked) { if (idx === -1) arr.push(opt.id); lab.classList.add('tpl-chk-on'); }
                     else { if (idx !== -1) arr.splice(idx, 1); lab.classList.remove('tpl-chk-on'); }
+                    // A naming-standard toggle changes the labels of every
+                    // section: redraw the whole configurator.
+                    if (opt.rename) _tplRenderConfig(tpl, state, container, onChange, getPrefix, getSlaves);
                     onChange();
                 });
                 lab.appendChild(inp);
                 const txt = document.createElement('span');
-                txt.textContent = opt.label || opt.id;
+                txt.textContent = rt(sec, opt.label || opt.id);
                 lab.appendChild(txt);
                 const infoBtn = _tplCreateInfoBtn(() => _tplOptionTags(tpl, opt, getPrefix && getPrefix(), getSlaves && getSlaves(), state));
                 lab.appendChild(infoBtn);
